@@ -1,0 +1,29 @@
+{
+  "arrival_time": "20250915084500",
+  "from_stop": "Aalto Yliopisto",
+  "human_readable_time": "2025-09-15 08:45:00",
+  "message": "Test route for Andrea's daily commute",
+  "routes": [
+    {
+      "api_response": {
+        "errors": [
+          {
+            "extensions": {
+              "classification": "ValidationError"
+            },
+            "locations": [
+              {
+                "column": 9,
+                "line": 6
+              }
+            ],
+            "message": "Validation error (WrongType@[planConnection]) : argument 'dateTime' with value 'ObjectValue{objectFields=[ObjectField{name='arriveBy', value=BooleanValue{value=true}}, ObjectField{name='dateTime', value=StringValue{value='2025-09-15T08:45:00'}}]}' contains a field not in 'PlanDateTimeInput': 'arriveBy'"
+          }
+        ]
+      },
+      "error": "Invalid API response format"
+    }
+  ],
+  "routes_found": 1,
+  "to_stop": "Keilaniemi"
+}

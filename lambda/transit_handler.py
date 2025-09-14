@@ -33,9 +33,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 })
             }
         
-        # Convert arrival time to proper format
+        # Convert arrival time to proper format for HSL GraphQL API
         try:
             arrival_dt = datetime.strptime(arrival_time, '%Y%m%d%H%M%S')
+            # HSL API expects local time without timezone offset + separate timeZone field
             arrival_iso = arrival_dt.isoformat()
         except ValueError:
             return {
@@ -94,13 +95,13 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
     from_coords = stop_coordinates.get(from_stop, stop_coordinates['Aalto Yliopisto'])
     to_coords = stop_coordinates.get(to_stop, stop_coordinates['Keilaniemi'])
     
-    # GraphQL query for route planning - Updated for current HSL API
+    # GraphQL query for route planning with arrival time constraint
     query = """
     {
       planConnection(
         origin: {location: {coordinate: {latitude: %s, longitude: %s}}}
         destination: {location: {coordinate: {latitude: %s, longitude: %s}}}
-        dateTime: {arriveBy: true, dateTime: "%s"}
+        dateTime: {latestArrival: "%s", timeZone: "Europe/Helsinki"}
         first: 3
       ) {
         edges {
@@ -141,11 +142,30 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
     try:
         hsl_api_url = os.getenv('HSL_API_URL', 'https://api.digitransit.fi/routing/v2/hsl/gtfs/v1')
         
-        api_key = os.getenv('DIGITRANSIT_API_KEY')
+        # Get API key from SSM Parameter Store or environment
+        api_key = None
+        if os.getenv('DIGITRANSIT_API_KEY_PARAM'):
+            try:
+                import boto3
+                ssm_client = boto3.client('ssm')
+                response = ssm_client.get_parameter(
+                    Name=os.getenv('DIGITRANSIT_API_KEY_PARAM'),
+                    WithDecryption=True
+                )
+                api_key = response['Parameter']['Value']
+            except Exception:
+                pass  # Fall back to env var
+        
+        if not api_key:
+            api_key = os.getenv('DIGITRANSIT_API_KEY')
+        
         headers = {
-            'Content-Type': 'application/json',
-            'digitransit-subscription-key': api_key
+            'Content-Type': 'application/json'
         }
+        
+        # Only add API key header if we have one (API works without key but with rate limits)
+        if api_key and api_key != 'PLACEHOLDER_SET_MANUALLY':
+            headers['digitransit-subscription-key'] = api_key
         
         response = requests.post(
             hsl_api_url,
