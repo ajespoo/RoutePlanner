@@ -32,7 +32,7 @@ class TransitApiStack(Stack):
             timeout=Duration.seconds(30),
             memory_size=512,
             environment={
-                "HSL_API_URL": "https://api.digitransit.fi/routing/v2/hsl/gtfs/v1",
+                "HSL_API_URL": "https://api.digitransit.fi/routing/v1/routers/hsl/index/graphql",
                 "DIGITRANSIT_API_KEY_PARAM": api_key_param.parameter_name
             }
         )

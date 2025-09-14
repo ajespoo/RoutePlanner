@@ -95,41 +95,36 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
     from_coords = stop_coordinates.get(from_stop, stop_coordinates['Aalto Yliopisto'])
     to_coords = stop_coordinates.get(to_stop, stop_coordinates['Keilaniemi'])
     
-    # GraphQL query for route planning with arrival time constraint
+    # GraphQL query for route planning using correct OTP routing endpoint
     query = """
     {
-      planConnection(
-        origin: {location: {coordinate: {latitude: %s, longitude: %s}}}
-        destination: {location: {coordinate: {latitude: %s, longitude: %s}}}
-        dateTime: {latestArrival: "%s", timeZone: "Europe/Helsinki"}
-        first: 3
+      plan(
+        from: {lat: %s, lon: %s}
+        to: {lat: %s, lon: %s}
+        dateTime: "%s"
+        arriveBy: true
+        numItineraries: 3
       ) {
-        edges {
-          node {
-            start
-            end
+        itineraries {
+          duration
+          startTime
+          endTime
+          legs {
+            mode
             duration
-            legs {
-              mode
-              duration
-              distance
-              start {
-                scheduledTime
-              }
-              end {
-                scheduledTime
-              }
-              from {
-                name
-              }
-              to {
-                name
-              }
-              trip {
-                route {
-                  shortName
-                  longName
-                }
+            distance
+            startTime
+            endTime
+            from {
+              name
+            }
+            to {
+              name
+            }
+            trip {
+              route {
+                shortName
+                longName
               }
             }
           }
@@ -140,7 +135,7 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
            to_coords['lat'], to_coords['lon'], arrival_time)
     
     try:
-        hsl_api_url = os.getenv('HSL_API_URL', 'https://api.digitransit.fi/routing/v2/hsl/gtfs/v1')
+        hsl_api_url = os.getenv('HSL_API_URL', 'https://api.digitransit.fi/routing/v1/routers/hsl/index/graphql')
         
         # Get API key from SSM Parameter Store or environment
         api_key = None
@@ -178,25 +173,25 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
             data = response.json()
             routes = []
             
-            # Debug: check the full response structure
-            if 'data' in data and data['data'] and data['data'].get('planConnection'):
-                plan_connection = data['data']['planConnection']
-                if plan_connection.get('edges'):
-                    for edge in plan_connection['edges']:
+            # Parse the routing API response using 'plan' structure
+            if 'data' in data and data['data'] and data['data'].get('plan'):
+                plan = data['data']['plan']
+                if plan.get('itineraries'):
+                    for itinerary in plan['itineraries']:
                         route_info = {
-                            'departure_time': edge['node']['start'],
-                            'arrival_time': edge['node']['end'],
-                            'duration_seconds': edge['node']['duration'],
+                            'departure_time': itinerary['startTime'],
+                            'arrival_time': itinerary['endTime'],
+                            'duration_seconds': itinerary['duration'],
                             'legs': []
                         }
                         
-                        for leg in edge['node']['legs']:
+                        for leg in itinerary['legs']:
                             leg_info = {
                                 'mode': leg['mode'],
-                                'duration_seconds': leg['duration'],
+                                'duration_seconds': leg.get('duration', 0),
                                 'distance_meters': leg.get('distance', 0),
-                                'departure_time': leg['start']['scheduledTime'],
-                                'arrival_time': leg['end']['scheduledTime'],
+                                'departure_time': leg['startTime'],
+                                'arrival_time': leg['endTime'],
                                 'from_place': leg.get('from', {}).get('name', 'Unknown'),
                                 'to_place': leg.get('to', {}).get('name', 'Unknown'),
                                 'route': leg['trip']['route']['shortName'] if leg.get('trip') and leg['trip'].get('route') else None,
