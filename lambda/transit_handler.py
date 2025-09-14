@@ -84,25 +84,23 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
     Query HSL GraphQL API for transit routes
     """
     
-    # For now, use coordinates for Aalto and Keilaniemi
-    # In production, you'd want to geocode the stop names
+    # Updated coordinates based on HSL data
     stop_coordinates = {
-        'Aalto Yliopisto': {'lat': 60.184700, 'lon': 24.829010},
-        'Keilaniemi': {'lat': 60.175294, 'lon': 24.684855},
+        'Aalto Yliopisto': {'lat': 60.1846, 'lon': 24.82554},  # HSL:2000102 - Aalto metro station
+        'Keilaniemi': {'lat': 60.175294, 'lon': 24.684855},   # Near KONE building in Keilaniemi
         'KONE Building': {'lat': 60.175294, 'lon': 24.684855}
     }
     
     from_coords = stop_coordinates.get(from_stop, stop_coordinates['Aalto Yliopisto'])
     to_coords = stop_coordinates.get(to_stop, stop_coordinates['Keilaniemi'])
     
-    # GraphQL query for route planning
+    # GraphQL query for route planning - Updated for current HSL API
     query = """
     {
       planConnection(
         origin: {location: {coordinate: {latitude: %s, longitude: %s}}}
         destination: {location: {coordinate: {latitude: %s, longitude: %s}}}
-        arriveBy: true
-        datetime: "%s"
+        dateTime: {arriveBy: true, dateTime: "%s"}
         first: 3
       ) {
         edges {
@@ -116,15 +114,15 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
               distance
               start {
                 scheduledTime
-                place {
-                  name
-                }
               }
               end {
                 scheduledTime
-                place {
-                  name
-                }
+              }
+              from {
+                name
+              }
+              to {
+                name
               }
               trip {
                 route {
@@ -143,8 +141,10 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
     try:
         hsl_api_url = os.getenv('HSL_API_URL', 'https://api.digitransit.fi/routing/v2/hsl/gtfs/v1')
         
+        api_key = os.getenv('DIGITRANSIT_API_KEY')
         headers = {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'digitransit-subscription-key': api_key
         }
         
         response = requests.post(
@@ -158,34 +158,43 @@ def get_transit_routes(from_stop: str, to_stop: str, arrival_time: str) -> List[
             data = response.json()
             routes = []
             
-            if 'data' in data and data['data']['planConnection']['edges']:
-                for edge in data['data']['planConnection']['edges']:
-                    route_info = {
-                        'departure_time': edge['node']['start'],
-                        'arrival_time': edge['node']['end'],
-                        'duration_seconds': edge['node']['duration'],
-                        'legs': []
-                    }
-                    
-                    for leg in edge['node']['legs']:
-                        leg_info = {
-                            'mode': leg['mode'],
-                            'duration_seconds': leg['duration'],
-                            'distance_meters': leg.get('distance', 0),
-                            'departure_time': leg['start']['scheduledTime'],
-                            'arrival_time': leg['end']['scheduledTime'],
-                            'from_place': leg['start']['place'].get('name', 'Unknown') if leg['start']['place'] else 'Unknown',
-                            'to_place': leg['end']['place'].get('name', 'Unknown') if leg['end']['place'] else 'Unknown',
-                            'route': leg['trip']['route']['shortName'] if leg.get('trip') and leg['trip'].get('route') else None,
-                            'route_name': leg['trip']['route']['longName'] if leg.get('trip') and leg['trip'].get('route') else None
+            # Debug: check the full response structure
+            if 'data' in data and data['data'] and data['data'].get('planConnection'):
+                plan_connection = data['data']['planConnection']
+                if plan_connection.get('edges'):
+                    for edge in plan_connection['edges']:
+                        route_info = {
+                            'departure_time': edge['node']['start'],
+                            'arrival_time': edge['node']['end'],
+                            'duration_seconds': edge['node']['duration'],
+                            'legs': []
                         }
-                        route_info['legs'].append(leg_info)
-                    
-                    routes.append(route_info)
+                        
+                        for leg in edge['node']['legs']:
+                            leg_info = {
+                                'mode': leg['mode'],
+                                'duration_seconds': leg['duration'],
+                                'distance_meters': leg.get('distance', 0),
+                                'departure_time': leg['start']['scheduledTime'],
+                                'arrival_time': leg['end']['scheduledTime'],
+                                'from_place': leg.get('from', {}).get('name', 'Unknown'),
+                                'to_place': leg.get('to', {}).get('name', 'Unknown'),
+                                'route': leg['trip']['route']['shortName'] if leg.get('trip') and leg['trip'].get('route') else None,
+                                'route_name': leg['trip']['route']['longName'] if leg.get('trip') and leg['trip'].get('route') else None
+                            }
+                            route_info['legs'].append(leg_info)
+                        
+                        routes.append(route_info)
+                else:
+                    # No routes found - this might be normal
+                    routes = [{'info': 'No routes found for the specified time/locations', 'api_response': data}]
+            else:
+                # Error in API response format
+                routes = [{'error': 'Invalid API response format', 'api_response': data}]
             
             return routes
         else:
-            return [{'error': f'HSL API error: {response.status_code}'}]
+            return [{'error': f'HSL API error: {response.status_code}', 'response_text': response.text[:500]}]
             
     except Exception as e:
         return [{'error': f'Failed to fetch routes: {str(e)}'}]
